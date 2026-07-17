@@ -1,0 +1,1 @@
+ALTER TABLE public.support_messages ADD COLUMN IF NOT EXISTS attachments JSONB;
