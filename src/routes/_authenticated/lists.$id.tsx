@@ -3,8 +3,14 @@ import { useEffect, useMemo, useState } from "react";
 import { Trash2, ArrowLeft, Truck, TrendingDown, Camera, Store, MapPin, History, TrendingUp, Minus, Plus } from "lucide-react";
 import { ExportPdfDialog } from "@/components/ExportPdfDialog";
 import { toast } from "sonner";
-import { supabase } from "@/integrations/supabase/client";
+import { useServerFn } from "@tanstack/react-start";
 import { useAuth } from "@/hooks/use-auth";
+import {
+  getListDetail,
+  addItemsToList,
+  removeListItem,
+  updateListItemQuantity,
+} from "@/lib/shopping-lists.functions";
 import { useGeolocation } from "@/hooks/use-geolocation";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -56,29 +62,22 @@ function ListDetail() {
   const [prices, setPrices] = useState<PriceReport[]>([]);
   const [freight, setFreight] = useState<Record<string, number>>({});
   const [historyFor, setHistoryFor] = useState<Item | null>(null);
+  const getListDetailFn = useServerFn(getListDetail);
+  const addItemsToListFn = useServerFn(addItemsToList);
+  const removeListItemFn = useServerFn(removeListItem);
+  const updateListItemQuantityFn = useServerFn(updateListItemQuantity);
 
   const isOwner = !!user && !!list && list.user_id === user.id;
 
   const load = async () => {
-    const [{ data: l }, { data: it }, { data: mk }] = await Promise.all([
-      supabase.from("shopping_lists").select("id,name,user_id").eq("id", id).maybeSingle(),
-      supabase.from("list_items").select("*").eq("list_id", id).order("created_at"),
-      supabase.from("markets").select("id,name,chain,color,latitude,longitude").order("name"),
-    ]);
-    setList(l ?? null);
-    setItems((it ?? []) as Item[]);
-    setMarkets((mk ?? []) as Market[]);
-
-    if (it && it.length > 0) {
-      const keys = Array.from(new Set(it.map((i: { product_key: string }) => i.product_key)));
-      const { data: pr } = await supabase
-        .from("price_reports")
-        .select("id,market_id,product_key,product_name,brand,price,unit,created_at")
-        .in("product_key", keys)
-        .order("created_at", { ascending: false });
-      setPrices((pr ?? []) as PriceReport[]);
-    } else {
-      setPrices([]);
+    try {
+      const detail = await getListDetailFn({ data: { id } });
+      setList(detail.list);
+      setItems((detail.items ?? []) as Item[]);
+      setMarkets((detail.markets ?? []) as Market[]);
+      setPrices((detail.prices ?? []) as PriceReport[]);
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Erro ao carregar lista");
     }
   };
 
@@ -92,58 +91,37 @@ function ListDetail() {
     picks: { product_name: string; product_key: string; category: string; unit: string; quantity: number }[],
   ) => {
     if (picks.length === 0) return;
-    const existingByKey = new Map(items.map((i) => [i.product_key, i]));
-    const toInsert: typeof picks = [];
-    const toUpdate: { id: string; quantity: number }[] = [];
-    for (const p of picks) {
-      const existing = existingByKey.get(p.product_key);
-      if (existing) {
-        toUpdate.push({ id: existing.id, quantity: existing.quantity + p.quantity });
-      } else {
-        toInsert.push(p);
-      }
-    }
-    const errors: string[] = [];
-    if (toInsert.length > 0) {
-      const rows = toInsert.map((p) => ({
-        list_id: id,
-        product_name: p.product_name,
-        product_key: p.product_key,
-        quantity: p.quantity,
-        category: p.category,
-        unit: p.unit,
-      }));
-      const { error } = await supabase.from("list_items").insert(rows);
-      if (error) errors.push(error.message);
-    }
-    for (const u of toUpdate) {
-      const { error } = await supabase.from("list_items").update({ quantity: u.quantity }).eq("id", u.id);
-      if (error) errors.push(error.message);
-    }
-    if (errors.length > 0) {
-      toast.error(errors[0]);
-    } else {
+    try {
+      const { insertedCount, updatedCount } = await addItemsToListFn({ data: { listId: id, picks } });
       const parts: string[] = [];
-      if (toInsert.length > 0) parts.push(`${toInsert.length} adicionado${toInsert.length > 1 ? "s" : ""}`);
-      if (toUpdate.length > 0) parts.push(`${toUpdate.length} já na lista — quantidade atualizada`);
+      if (insertedCount > 0) parts.push(`${insertedCount} adicionado${insertedCount > 1 ? "s" : ""}`);
+      if (updatedCount > 0) parts.push(`${updatedCount} já na lista — quantidade atualizada`);
       toast.success(parts.join(" · "));
       load();
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Erro ao adicionar itens");
     }
   };
 
 
   const removeItem = async (itemId: string) => {
-    const { error } = await supabase.from("list_items").delete().eq("id", itemId);
-    if (error) toast.error(error.message);
-    else load();
+    try {
+      await removeListItemFn({ data: { itemId } });
+      load();
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Erro ao remover item");
+    }
   };
 
   const updateQuantity = async (itemId: string, currentQty: number, delta: number) => {
     const newQty = Math.max(1, currentQty + delta);
     if (newQty === currentQty) return;
-    const { error } = await supabase.from("list_items").update({ quantity: newQty }).eq("id", itemId);
-    if (error) toast.error(error.message);
-    else load();
+    try {
+      await updateListItemQuantityFn({ data: { itemId, quantity: newQty } });
+      load();
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Erro ao atualizar quantidade");
+    }
   };
 
   // ---- comparison engine ----

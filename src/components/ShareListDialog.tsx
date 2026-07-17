@@ -2,8 +2,8 @@ import { useEffect, useState } from "react";
 import { Loader2, Share2, Trash2, UserPlus } from "lucide-react";
 import { toast } from "sonner";
 import { useServerFn } from "@tanstack/react-start";
-import { supabase } from "@/integrations/supabase/client";
 import { findUserIdByEmail } from "@/lib/share.functions";
+import { listShares, inviteToList, removeShare } from "@/lib/list-shares.functions";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -20,23 +20,18 @@ export function ShareListDialog({ listId, isOwner }: Props) {
   const [loading, setLoading] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const findUser = useServerFn(findUserIdByEmail);
+  const listSharesFn = useServerFn(listShares);
+  const inviteToListFn = useServerFn(inviteToList);
+  const removeShareFn = useServerFn(removeShare);
 
   const load = async () => {
     setLoading(true);
-    const { data: rows } = await supabase
-      .from("list_shares")
-      .select("id, shared_with_user_id, created_at")
-      .eq("list_id", listId)
-      .order("created_at");
-    const list = rows ?? [];
-    let withNames: Share[] = list.map((r) => ({ ...r, full_name: null }));
-    if (list.length > 0) {
-      const ids = list.map((r) => r.shared_with_user_id);
-      const { data: profs } = await supabase.from("profiles").select("id, full_name").in("id", ids);
-      const map = new Map((profs ?? []).map((p: { id: string; full_name: string | null }) => [p.id, p.full_name]));
-      withNames = list.map((r) => ({ ...r, full_name: map.get(r.shared_with_user_id) ?? null }));
+    try {
+      const rows = await listSharesFn({ data: { listId } });
+      setShares(rows);
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Erro ao carregar compartilhamentos");
     }
-    setShares(withNames);
     setLoading(false);
   };
 
@@ -55,10 +50,9 @@ export function ShareListDialog({ listId, isOwner }: Props) {
         toast.error("Nenhuma usuária Dona Marisa com esse e-mail. Peça pra ela criar conta primeiro 💜");
         return;
       }
-      const { error } = await supabase.from("list_shares").insert({ list_id: listId, shared_with_user_id: userId });
-      if (error) {
-        if (error.code === "23505") toast.info("Essa pessoa já tem acesso.");
-        else throw error;
+      const result = await inviteToListFn({ data: { listId, userId } });
+      if (result.alreadyShared) {
+        toast.info("Essa pessoa já tem acesso.");
       } else {
         toast.success("Convite enviado!");
         setEmail("");
@@ -72,11 +66,12 @@ export function ShareListDialog({ listId, isOwner }: Props) {
   };
 
   const remove = async (id: string) => {
-    const { error } = await supabase.from("list_shares").delete().eq("id", id);
-    if (error) toast.error(error.message);
-    else {
+    try {
+      await removeShareFn({ data: { id } });
       toast.success("Acesso removido");
       load();
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Erro ao remover acesso");
     }
   };
 

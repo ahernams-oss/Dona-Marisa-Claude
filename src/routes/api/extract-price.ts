@@ -1,12 +1,23 @@
 import { createFileRoute } from "@tanstack/react-router";
 
+// Este endpoint fala com um gateway de chat completions no formato OpenAI
+// (`{ model, messages, response_format }` -> `{ choices: [{ message: { content } }] }`).
+// Por padrão aponta para o gateway de IA do Lovable Cloud, mas qualquer provedor
+// compatível com esse formato (OpenRouter, endpoint próprio, etc.) funciona só
+// trocando as env vars abaixo — sem tocar neste arquivo.
+const AI_GATEWAY_BASE_URL =
+  process.env.AI_GATEWAY_BASE_URL || "https://ai.gateway.lovable.dev/v1/chat/completions";
+const AI_GATEWAY_API_KEY = process.env.AI_GATEWAY_API_KEY || process.env.LOVABLE_API_KEY;
+const AI_GATEWAY_MODEL_PRIMARY = process.env.AI_GATEWAY_MODEL_PRIMARY || "google/gemini-3-flash-preview";
+const AI_GATEWAY_MODEL_FALLBACK = process.env.AI_GATEWAY_MODEL_FALLBACK || "google/gemini-2.5-flash";
+
 export const Route = createFileRoute("/api/extract-price")({
   server: {
     handlers: {
       POST: async ({ request }) => {
-        const key = process.env.LOVABLE_API_KEY;
+        const key = AI_GATEWAY_API_KEY;
         if (!key) {
-          return new Response(JSON.stringify({ error: "Missing LOVABLE_API_KEY" }), {
+          return new Response(JSON.stringify({ error: "Missing AI_GATEWAY_API_KEY" }), {
             status: 500,
             headers: { "Content-Type": "application/json" },
           });
@@ -56,7 +67,7 @@ Se a imagem estiver totalmente ilegível, borrada ou não contiver uma etiqueta 
 {"error": "unreadable"}`;
 
         const callModel = async (model: string) =>
-          fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
+          fetch(AI_GATEWAY_BASE_URL, {
             method: "POST",
             headers: {
               Authorization: `Bearer ${key}`,
@@ -82,11 +93,11 @@ Se a imagem estiver totalmente ilegível, borrada ou não contiver uma etiqueta 
           });
 
         try {
-          let upstream = await callModel("google/gemini-3-flash-preview");
+          let upstream = await callModel(AI_GATEWAY_MODEL_PRIMARY);
 
           // Fallback para modelo estável se o preview falhar por erro transitório
           if (!upstream.ok && upstream.status >= 500) {
-            upstream = await callModel("google/gemini-2.5-flash");
+            upstream = await callModel(AI_GATEWAY_MODEL_FALLBACK);
           }
 
           if (!upstream.ok) {

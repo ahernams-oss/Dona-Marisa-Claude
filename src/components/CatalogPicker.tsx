@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Search, ListPlus, Check, X, Minus, Plus } from "lucide-react";
-import { supabase } from "@/integrations/supabase/client";
+import { useServerFn } from "@tanstack/react-start";
+import { listProductCatalog } from "@/lib/catalog.functions";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
@@ -45,6 +46,7 @@ export function CatalogPicker({ onAdd, existingKeys }: Props) {
   const [popoverOpen, setPopoverOpen] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
+  const listProductCatalogFn = useServerFn(listProductCatalog);
 
   // Fechar popover ao clicar/tocar fora do container de busca (evita bugs do onBlur no mobile)
   useEffect(() => {
@@ -64,18 +66,16 @@ export function CatalogPicker({ onAdd, existingKeys }: Props) {
   useEffect(() => {
     let cancelled = false;
     (async () => {
-      const { data } = await supabase
-        .from("product_catalog")
-        .select("id, product_key, name, category, unit")
-        .order("name");
+      const data = await listProductCatalogFn();
       if (!cancelled) {
-        setAll((data ?? []) as CatalogProduct[]);
+        setAll(data as CatalogProduct[]);
         setLoading(false);
       }
     })();
     return () => {
       cancelled = true;
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   // Suggestions for inline autocomplete

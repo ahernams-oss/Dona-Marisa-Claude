@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Check, ChevronsUpDown, Plus, Search, Tag, Loader2 } from "lucide-react";
 import { toast } from "sonner";
-import { supabase } from "@/integrations/supabase/client";
+import { useServerFn } from "@tanstack/react-start";
+import { requestBrand } from "@/lib/catalog.functions";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -14,7 +15,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import { cn, normalizeProductKey, CATEGORIES } from "@/lib/utils";
+import { cn, CATEGORIES } from "@/lib/utils";
 
 export type Brand = { id: string; name: string; normalized_name: string; category: string | null };
 
@@ -35,6 +36,7 @@ export function BrandPicker({ value, onChange, brands, productKey, productCatego
   const [requestName, setRequestName] = useState("");
   const [requestCategory, setRequestCategory] = useState<string>("");
   const [submitting, setSubmitting] = useState(false);
+  const requestBrandFn = useServerFn(requestBrand);
 
   const filtered = useMemo(() => {
     const q = search.toLowerCase().trim();
@@ -62,16 +64,13 @@ export function BrandPicker({ value, onChange, brands, productKey, productCatego
     }
     setSubmitting(true);
     try {
-      const { data: u } = await supabase.auth.getUser();
-      if (!u.user) throw new Error("Sessão expirada");
-      const { error } = await supabase.from("brand_requests").insert({
-        name,
-        normalized_name: normalizeProductKey(name),
-        suggested_category: requestCategory || null,
-        product_key: productKey ?? null,
-        requested_by: u.user.id,
+      await requestBrandFn({
+        data: {
+          name,
+          suggestedCategory: requestCategory || null,
+          productKey: productKey ?? null,
+        },
       });
-      if (error) throw error;
       toast.success("Solicitação enviada! Um moderador irá revisar.");
       setRequestOpen(false);
       setRequestName("");

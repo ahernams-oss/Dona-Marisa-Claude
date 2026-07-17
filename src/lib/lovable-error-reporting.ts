@@ -20,7 +20,15 @@ declare global {
 
 export function reportLovableError(error: unknown, context: Record<string, unknown> = {}) {
   if (typeof window === "undefined") return;
-  window.__lovableEvents?.captureException?.(
+
+  if (!window.__lovableEvents?.captureException) {
+    // Fora do preview/host do Lovable esse global não existe — não deixar o
+    // erro desaparecer em silêncio (ex.: build próprio, outro host).
+    console.error("[error-boundary]", error, { route: window.location.pathname, ...context });
+    return;
+  }
+
+  window.__lovableEvents.captureException(
     error,
     {
       source: "react_error_boundary",

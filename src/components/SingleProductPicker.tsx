@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Search, Check, X, Package } from "lucide-react";
-import { supabase } from "@/integrations/supabase/client";
+import { useServerFn } from "@tanstack/react-start";
+import { listProductCatalog } from "@/lib/catalog.functions";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
@@ -40,22 +41,21 @@ export function SingleProductPicker({ value, onChange, seed }: Props) {
   const [modalOpen, setModalOpen] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
   const seededRef = useRef<string | null>(null);
+  const listProductCatalogFn = useServerFn(listProductCatalog);
 
   useEffect(() => {
     let cancelled = false;
     (async () => {
-      const { data } = await supabase
-        .from("product_catalog")
-        .select("id, product_key, name, category, unit")
-        .order("name");
+      const data = await listProductCatalogFn();
       if (!cancelled) {
-        setAll((data ?? []) as CatalogProduct[]);
+        setAll(data as CatalogProduct[]);
         setLoading(false);
       }
     })();
     return () => {
       cancelled = true;
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   // When AI seeds a new name, try to auto-select an exact match; otherwise

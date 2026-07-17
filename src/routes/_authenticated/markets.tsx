@@ -1,13 +1,19 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useEffect, useMemo, useState } from "react";
 import { Store, Plus, Pencil, Trash2, Search, MapPin, Loader2 } from "lucide-react";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
 import { toast } from "sonner";
 
-import { supabase } from "@/integrations/supabase/client";
 import { formatBRL } from "@/lib/utils";
 import { checkIsAdmin } from "@/lib/admin.functions";
+import {
+  listMarkets,
+  listRecentPriceReports,
+  createMarket,
+  updateMarket,
+  deleteMarket,
+} from "@/lib/markets.functions";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -79,10 +85,9 @@ type Report = { market_id: string; price: number; product_name: string; created_
 const COLORS = ["#6C5CE7", "#FF6B6B", "#1DD1A1", "#FFB400", "#0EA5E9", "#EC4899", "#10B981", "#F97316"];
 
 function MarketsPage() {
-  const [markets, setMarkets] = useState<Market[]>([]);
-  const [reports, setReports] = useState<Report[]>([]);
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editing, setEditing] = useState<Market | null>(null);
+  const queryClient = useQueryClient();
 
   const checkFn = useServerFn(checkIsAdmin);
   const { data: adminData } = useQuery({
@@ -91,22 +96,23 @@ function MarketsPage() {
   });
   const isAdmin = !!adminData?.isAdmin;
 
-  async function load() {
-    const [{ data: m }, { data: r }] = await Promise.all([
-      supabase.from("markets").select("*").order("name"),
-      supabase
-        .from("price_reports")
-        .select("market_id,price,product_name,created_at")
-        .order("created_at", { ascending: false })
-        .limit(200),
-    ]);
-    setMarkets((m ?? []) as Market[]);
-    setReports((r ?? []) as Report[]);
-  }
+  const listMarketsFn = useServerFn(listMarkets);
+  const listReportsFn = useServerFn(listRecentPriceReports);
+  const deleteMarketFn = useServerFn(deleteMarket);
 
-  useEffect(() => {
-    load();
-  }, []);
+  const { data: markets = [] } = useQuery({
+    queryKey: ["markets"],
+    queryFn: () => listMarketsFn() as Promise<Market[]>,
+  });
+  const { data: reports = [] } = useQuery({
+    queryKey: ["price-reports-recent"],
+    queryFn: () => listReportsFn() as Promise<Report[]>,
+  });
+
+  function load() {
+    queryClient.invalidateQueries({ queryKey: ["markets"] });
+    queryClient.invalidateQueries({ queryKey: ["price-reports-recent"] });
+  }
 
   function openNew() {
     setEditing(null);
@@ -119,13 +125,13 @@ function MarketsPage() {
 
   async function handleDelete(m: Market) {
     if (!confirm(`Remover o mercado "${m.name}"?`)) return;
-    const { error } = await supabase.from("markets").delete().eq("id", m.id);
-    if (error) {
-      toast.error(error.message);
-      return;
+    try {
+      await deleteMarketFn({ data: { id: m.id } });
+      toast.success("Mercado removido");
+      load();
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Erro ao remover mercado");
     }
-    toast.success("Mercado removido");
-    load();
   }
 
   return (
@@ -247,6 +253,8 @@ function MarketDialog({
   const [saving, setSaving] = useState(false);
   const [lookingUpCep, setLookingUpCep] = useState(false);
   const [locating, setLocating] = useState(false);
+  const createMarketFn = useServerFn(createMarket);
+  const updateMarketFn = useServerFn(updateMarket);
 
   useEffect(() => {
     if (open) {
@@ -400,17 +408,19 @@ function MarketDialog({
       number: number.trim() || null,
       neighborhood: neighborhood.trim() || null,
     };
-    const op = market
-      ? supabase.from("markets").update(payload).eq("id", market.id)
-      : supabase.from("markets").insert(payload);
-    const { error } = await op;
-    setSaving(false);
-    if (error) {
-      toast.error(error.message);
-      return;
+    try {
+      if (market) {
+        await updateMarketFn({ data: { id: market.id, payload } });
+      } else {
+        await createMarketFn({ data: payload });
+      }
+      toast.success(market ? "Mercado atualizado" : "Mercado criado");
+      onSaved();
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Erro ao salvar mercado");
+    } finally {
+      setSaving(false);
     }
-    toast.success(market ? "Mercado atualizado" : "Mercado criado");
-    onSaved();
   }
 
   return (

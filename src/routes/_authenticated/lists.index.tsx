@@ -2,10 +2,11 @@ import { createFileRoute, Link } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
 import { Plus, ListChecks, Trash2, Users } from "lucide-react";
 import { toast } from "sonner";
-import { supabase } from "@/integrations/supabase/client";
+import { useServerFn } from "@tanstack/react-start";
 import { useAuth } from "@/hooks/use-auth";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { listShoppingLists, createShoppingList, deleteShoppingList } from "@/lib/shopping-lists.functions";
 
 export const Route = createFileRoute("/_authenticated/lists/")({
   component: ListsPage,
@@ -24,16 +25,14 @@ function ListsPage() {
   const [lists, setLists] = useState<ShoppingList[]>([]);
   const [newName, setNewName] = useState("");
   const [loading, setLoading] = useState(true);
+  const listShoppingListsFn = useServerFn(listShoppingLists);
+  const createShoppingListFn = useServerFn(createShoppingList);
+  const deleteShoppingListFn = useServerFn(deleteShoppingList);
 
   const load = async () => {
     setLoading(true);
-    const { data, error } = await supabase
-      .from("shopping_lists")
-      .select("id, name, created_at, user_id, list_items(count)")
-      .order("created_at", { ascending: false });
-    if (error) {
-      toast.error(error.message);
-    } else {
+    try {
+      const data = await listShoppingListsFn();
       setLists(
         (data ?? []).map((l: { id: string; name: string; created_at: string; user_id: string; list_items: { count: number }[] }) => ({
           id: l.id,
@@ -43,6 +42,8 @@ function ListsPage() {
           item_count: l.list_items?.[0]?.count ?? 0,
         })),
       );
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Erro ao carregar listas");
     }
     setLoading(false);
   };
@@ -54,22 +55,24 @@ function ListsPage() {
   const createList = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!newName.trim() || !user) return;
-    const { error } = await supabase.from("shopping_lists").insert({ name: newName.trim(), user_id: user.id });
-    if (error) toast.error(error.message);
-    else {
+    try {
+      await createShoppingListFn({ data: { name: newName.trim() } });
       setNewName("");
       toast.success("Lista criada!");
       load();
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Erro ao criar lista");
     }
   };
 
   const deleteList = async (id: string) => {
     if (!confirm("Excluir esta lista?")) return;
-    const { error } = await supabase.from("shopping_lists").delete().eq("id", id);
-    if (error) toast.error(error.message);
-    else {
+    try {
+      await deleteShoppingListFn({ data: { id } });
       toast.success("Lista excluída");
       load();
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Erro ao excluir lista");
     }
   };
 

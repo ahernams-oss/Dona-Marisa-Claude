@@ -4,8 +4,15 @@ import { Camera, Sparkles, Upload, Loader2, Info, Check, ChevronsUpDown, Store, 
 import { toast } from "sonner";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { queryOptions, useSuspenseQuery } from "@tanstack/react-query";
+import { useServerFn } from "@tanstack/react-start";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/hooks/use-auth";
+import {
+  listMarketsForReporting,
+  listBrands,
+  listProductBrandLinks,
+  createPriceReport,
+} from "@/lib/price-reports.functions";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -23,28 +30,14 @@ type Market = { id: string; name: string; color: string | null; chain: string | 
 
 const marketsQueryOptions = queryOptions({
   queryKey: ["markets", "picker"],
-  queryFn: async (): Promise<Market[]> => {
-    const { data, error } = await supabase
-      .from("markets")
-      .select("id,name,color,chain,city,state,latitude,longitude")
-      .order("name");
-    if (error) throw error;
-    return (data ?? []) as Market[];
-  },
+  queryFn: async (): Promise<Market[]> => (await listMarketsForReporting()) as Market[],
   staleTime: 5 * 60_000,
   gcTime: 30 * 60_000,
 });
 
 const brandsQueryOptions = queryOptions({
   queryKey: ["brands", "picker"],
-  queryFn: async (): Promise<Brand[]> => {
-    const { data, error } = await supabase
-      .from("brands")
-      .select("id,name,normalized_name,category")
-      .order("name");
-    if (error) throw error;
-    return (data ?? []) as Brand[];
-  },
+  queryFn: async (): Promise<Brand[]> => (await listBrands()) as Brand[],
   staleTime: 5 * 60_000,
   gcTime: 30 * 60_000,
 });
@@ -53,13 +46,7 @@ type ProductBrandLink = { product_key: string; brand_id: string };
 
 const productBrandsQueryOptions = queryOptions({
   queryKey: ["product-brands", "all"],
-  queryFn: async (): Promise<ProductBrandLink[]> => {
-    const { data, error } = await supabase
-      .from("product_brands")
-      .select("product_key,brand_id");
-    if (error) throw error;
-    return (data ?? []) as ProductBrandLink[];
-  },
+  queryFn: async (): Promise<ProductBrandLink[]> => (await listProductBrandLinks()) as ProductBrandLink[],
   staleTime: 5 * 60_000,
   gcTime: 30 * 60_000,
 });
@@ -118,6 +105,7 @@ function ReportPage() {
   const [aiSeed, setAiSeed] = useState<string>("");
   const [brand, setBrand] = useState<Brand | null>(null);
   const [price, setPrice] = useState("");
+  const createPriceReportFn = useServerFn(createPriceReport);
   const selectedMarket = markets.find((m) => m.id === marketId);
   const { position: geo, requesting: geoRequesting, error: geoError, request: requestGeo, clear: clearGeo } = useGeolocation();
   const [sortByDistance, setSortByDistance] = useState(false);
@@ -265,19 +253,19 @@ function ReportPage() {
         if (upErr) throw upErr;
         photoUrl = path;
       }
-      const { error } = await supabase.from("price_reports").insert({
-        market_id: marketId,
-        reporter_id: user.id,
-        product_name: product.name,
-        product_key: product.product_key,
-        brand_id: brand.id,
-        brand: brand.name,
-        price: Number(price),
-        unit: product.unit,
-        category: product.category,
-        photo_url: photoUrl,
+      await createPriceReportFn({
+        data: {
+          market_id: marketId,
+          product_name: product.name,
+          product_key: product.product_key,
+          brand_id: brand.id,
+          brand: brand.name,
+          price: Number(price),
+          unit: product.unit,
+          category: product.category,
+          photo_url: photoUrl,
+        },
       });
-      if (error) throw error;
       toast.success(`Preço de ${product.name} (${formatBRL(Number(price))}) reportado!`);
       navigate({ to: "/lists" });
     } catch (e) {
